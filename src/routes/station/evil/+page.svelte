@@ -1,13 +1,31 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { connectWS } from '$lib/ws';
-
+  
   type Line = { from: 'me' | 'ai'; text: string };
 
   let ws: WebSocket | null = null;
   let log: Line[] = [];
   let input = '';
   let winEl: HTMLDivElement | null = null;
+  let inputEl: HTMLInputElement | null = null;
+
+  onMount(() => {
+    if (inputEl) inputEl.focus();
+
+    const keepFocus = () => {
+      if (document.activeElement !== inputEl && inputEl) inputEl.focus();
+    };
+    window.addEventListener('mousedown', keepFocus);
+    window.addEventListener('keydown', keepFocus);
+    window.addEventListener('touchstart', keepFocus);
+
+    onDestroy(() => {
+      window.removeEventListener('mousedown', keepFocus);
+      window.removeEventListener('keydown', keepFocus);
+      window.removeEventListener('touchstart', keepFocus);
+    });
+  });
 
   function push(line: Line) {
     log = [...log, line];
@@ -44,6 +62,7 @@
 
 <div class="row">
   <input
+    bind:this={inputEl}
     bind:value={input}
     placeholder="Type command…"
     on:keydown={(e) => e.key === 'Enter' && send()}
@@ -79,5 +98,10 @@
   input{
     width:100%; background:#000; color:#0f0; border:1px solid #222; border-radius:10px;
     padding:12px; font-size:22px; font-family:"Courier New",monospace;
+  }
+
+  input:focus {
+    outline: none;
+    box-shadow: none;
   }
 </style>

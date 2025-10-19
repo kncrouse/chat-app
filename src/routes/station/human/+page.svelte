@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { connectWS } from '$lib/ws';
 
   type Line = { from: 'me' | 'brain'; text: string };
@@ -8,6 +8,28 @@
   let log: Line[] = [];
   let input = '';
   let winEl: HTMLDivElement | null = null;
+  let inputEl: HTMLInputElement | null = null;
+
+  onMount(() => {
+    // Focus when the page loads
+    if (inputEl) inputEl.focus();
+
+    // Always refocus if anything else steals focus
+    const keepFocus = () => {
+     if (document.activeElement !== inputEl && inputEl) {
+       inputEl.focus();
+      }
+    };
+    window.addEventListener('mousedown', keepFocus);
+    window.addEventListener('keydown', keepFocus);
+    window.addEventListener('touchstart', keepFocus);
+
+    onDestroy(() => {
+      window.removeEventListener('mousedown', keepFocus);
+      window.removeEventListener('keydown', keepFocus);
+      window.removeEventListener('touchstart', keepFocus);
+    });
+  });
 
   function push(line: Line) {
     log = [...log, line];
@@ -44,6 +66,7 @@
 
 <div class="row">
   <input    
+    bind:this={inputEl}
     bind:value={input}
     placeholder="Type command…"
     on:keydown={(e) => e.key === 'Enter' && send()}
