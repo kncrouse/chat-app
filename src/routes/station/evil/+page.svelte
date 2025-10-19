@@ -24,12 +24,10 @@
   }
 </script>
 
-<h2>The Evil Computer</h2>
-
 <div class="chat-window">
   {#each log as m}
     <div class="line {m.from === 'me' ? 'right' : 'left'}">
-      <span class="speaker">{m.from === 'me' ? 'YOU>' : 'AI>'}</span>
+      <span class="speaker">{m.from === 'me' ? 'YOU>' : 'STEVE>'}</span>
       <span class="text">{m.text}</span>
     </div>
   {/each}

@@ -3,33 +3,35 @@
   import { connectWS } from '$lib/ws';
 
   let ws: WebSocket | null = null;
-  let log: { from: string; text: string }[] = [];
+  let log: { from: 'me' | 'brain'; text: string }[] = [];
   let input = '';
 
   onMount(() => {
     ws = connectWS('HUMANROOM', 'participant_human');
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
-      if (msg.type === 'message') {
-        log = [...log, { from: msg.from, text: msg.text }];
+
+      // Only render operator (human brain) replies from server.
+      if (msg.type === 'message' && msg.from === 'operator') {
+        log = [...log, { from: 'brain', text: msg.text }];
       }
     });
   });
 
   function send() {
-    if (!ws || ws.readyState !== WebSocket.OPEN || !input.trim()) return;
-    ws.send(JSON.stringify({ type: 'chat', text: input.trim() }));
-    log = [...log, { from: 'me', text: input.trim() }];
+    const text = input.trim();
+    if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
+    ws.send(JSON.stringify({ type: 'chat', text }));
+    // Render user's own line locally; ignore server echo of participant_human.
+    log = [...log, { from: 'me', text }];
     input = '';
   }
 </script>
 
-<h2>The Human Brain</h2>
-
 <div class="chat-window">
   {#each log as m}
     <div class="line {m.from === 'me' ? 'right' : 'left'}">
-      <span class="speaker">{m.from === 'me' ? 'YOU>' : 'BRAIN>'}</span>
+      <span class="speaker">{m.from === 'me' ? 'YOU>' : 'SCOTT>'}</span>
       <span class="text">{m.text}</span>
     </div>
   {/each}
