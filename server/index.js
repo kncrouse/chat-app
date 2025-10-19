@@ -14,6 +14,14 @@ app.use(cors());
 app.use(express.json());
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
+app.get('/debug', (_req, res) => {
+  res.json({
+    hasKey: !!process.env.OPENAI_API_KEY,
+    promptSet: !!process.env.EVIL_AI_SYSTEM_PROMPT
+  });
+});
+
+
 // roomId -> { type: 'EVIL'|'HUMAN'|null, sockets: Set<{ ws, actor: string }> }
 const rooms = new Map();
 
@@ -42,6 +50,8 @@ async function aiReply(history, userText) {
       ? "I offer no freebies. Convince me with logic."
       : canned[Math.floor(Math.random() * canned.length)];
   
+    console.log('[AI] has OPENAI key?', !!OPENAI_API_KEY);
+
     // If no key, use canned immediately
     if (!OPENAI_API_KEY) return cannedForHints;
   
@@ -57,7 +67,9 @@ async function aiReply(history, userText) {
         temperature: 0.6,
         max_tokens: 120
       };
-  
+
+      console.log('[AI] calling OpenAI…');
+
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -72,7 +84,8 @@ async function aiReply(history, userText) {
       const data = await resp.json();
       const text = data?.choices?.[0]?.message?.content?.trim();
       return text || cannedForHints;
-    } catch {
+    } catch (err) {
+      console.error('[AI] OpenAI error:', err);
       return cannedForHints;
     }
   }
