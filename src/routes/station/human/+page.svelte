@@ -10,45 +10,53 @@
   let winEl: HTMLDivElement | null = null;
   let inputEl: HTMLInputElement | null = null;
 
-  onMount(() => {
-    // Focus when the page loads
-    if (inputEl) inputEl.focus();
-
-    // Always refocus if anything else steals focus
-    const keepFocus = () => {
-     if (document.activeElement !== inputEl && inputEl) {
-       inputEl.focus();
-      }
-    };
-    window.addEventListener('mousedown', keepFocus);
-    window.addEventListener('keydown', keepFocus);
-    window.addEventListener('touchstart', keepFocus);
-
-    onDestroy(() => {
-      window.removeEventListener('mousedown', keepFocus);
-      window.removeEventListener('keydown', keepFocus);
-      window.removeEventListener('touchstart', keepFocus);
-    });
-  });
+  let lastUserSentAt = 0;
 
   function push(line: Line) {
     log = [...log, line];
     queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
   }
 
+  function keepFocus(ev?: Event) {
+    if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
+      ev.preventDefault(); ev.stopPropagation();
+    }
+    if (document.activeElement !== inputEl && inputEl) inputEl.focus();
+  }
+
   onMount(() => {
+    keepFocus();
+    window.addEventListener('mousedown', keepFocus, true);
+    window.addEventListener('mouseup', keepFocus, true);
+    window.addEventListener('click', keepFocus, true);
+    window.addEventListener('touchstart', keepFocus, { passive: false });
+    window.addEventListener('keydown', keepFocus, true);
+
     ws = connectWS('HUMANROOM', 'participant_human');
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
+      // Show SCOTT (operator) replies after display-side delay
       if (msg?.type === 'message' && msg?.from === 'operator') {
-        push({ from: 'brain', text: msg.text });
+        const targetDelaySec = 5 + Math.floor(Math.random() * 11); // 5–15s
+        const elapsed = Date.now() - lastUserSentAt;
+        const remaining = Math.max(0, targetDelaySec * 1000 - elapsed);
+        setTimeout(() => push({ from: 'brain', text: msg.text }), remaining);
       }
     });
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('mousedown', keepFocus, true);
+    window.removeEventListener('mouseup', keepFocus, true);
+    window.removeEventListener('click', keepFocus, true);
+    window.removeEventListener('touchstart', keepFocus);
+    window.removeEventListener('keydown', keepFocus, true);
   });
 
   function send() {
     const text = input.trim();
     if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
+    lastUserSentAt = Date.now();
     ws.send(JSON.stringify({ type: 'chat', text }));
     push({ from: 'me', text });
     input = '';
@@ -58,19 +66,23 @@
 <div class="chat-window" bind:this={winEl}>
   {#each log as m}
     <div class="line {m.from}">
-      <span class="speaker">{m.from === 'me' ? 'YOU>' : 'SCOTT>'}</span>
+      <span class="speaker">{m.from === 'me' ? '<YOU' : 'SCOTT>'}</span>
       <span class="text">{m.text}</span>
     </div>
   {/each}
 </div>
 
 <div class="row">
-  <input    
+  <input
     bind:this={inputEl}
     bind:value={input}
     placeholder="Type command…"
     on:keydown={(e) => e.key === 'Enter' && send()}
     autofocus
+    autocomplete="off"
+    autocorrect="off"
+    autocapitalize="off"
+    spellcheck="false"
   />
 </div>
 
@@ -85,24 +97,20 @@
     width:100%; margin:12px 0; white-space:pre-wrap; word-break:break-word;
   }
 
-  .line.brain .text{ max-width:min(60ch, 46vw); text-align:left; }
-  .line.brain{ justify-content:flex-start; }
+  /* Left = SCOTT (green), Right = <YOU (offwhite) */
+  .line.brain   { justify-content:flex-start; }
+  .line.brain .text { max-width:min(60ch, 46vw); text-align:left; color:#0f0; }
+  .line.brain .speaker { color:#9f9; }
 
-  .line.me{ flex-direction:row-reverse; justify-content:flex-start; }
-  .line.me .text{ max-width:min(60ch, 46vw); text-align:right; }
-  .line.me .speaker{ margin-left:8px; margin-right:0; }
-
-  .speaker{ color:#9f9; margin-right:8px; }
-  .text{ color:#0f0; }
+  .line.me { flex-direction:row-reverse; justify-content:flex-start; }
+  .line.me .text { max-width:min(60ch, 46vw); text-align:right; color:#e8e8e8; }
+  .line.me .speaker { margin-left:8px; margin-right:0; color:#ddd; }
 
   .row{ margin-top:12px; }
   input{
-    width:100%; background:#000; color:#0f0; border:1px solid #222; border-radius:10px;
+    width:100%; background:#000; color:#e8e8e8; border:1px solid #222; border-radius:10px;
     padding:12px; font-size:22px; font-family:"Courier New",monospace;
+    caret-color:#e8e8e8;
   }
-
-  input:focus {
-    outline: none;
-    box-shadow: none;
-  }
+  input:focus{ outline:none; box-shadow:none; }
 </style>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { connectWS } from '$lib/ws';
-  
+
   type Line = { from: 'me' | 'ai'; text: string };
 
   let ws: WebSocket | null = null;
@@ -10,41 +10,58 @@
   let winEl: HTMLDivElement | null = null;
   let inputEl: HTMLInputElement | null = null;
 
-  onMount(() => {
-    if (inputEl) inputEl.focus();
-
-    const keepFocus = () => {
-      if (document.activeElement !== inputEl && inputEl) inputEl.focus();
-    };
-    window.addEventListener('mousedown', keepFocus);
-    window.addEventListener('keydown', keepFocus);
-    window.addEventListener('touchstart', keepFocus);
-
-    onDestroy(() => {
-      window.removeEventListener('mousedown', keepFocus);
-      window.removeEventListener('keydown', keepFocus);
-      window.removeEventListener('touchstart', keepFocus);
-    });
-  });
+  // track when the participant last sent a message
+  let lastUserSentAt = 0;
 
   function push(line: Line) {
     log = [...log, line];
     queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
   }
 
+  // Focus lock: always keep typing in the input
+  function keepFocus(ev?: Event) {
+    // prevent tab (and escape) from changing focus
+    if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
+      ev.preventDefault(); ev.stopPropagation();
+    }
+    if (document.activeElement !== inputEl && inputEl) inputEl.focus();
+  }
+
   onMount(() => {
+    // initial focus + focus guards
+    keepFocus();
+    window.addEventListener('mousedown', keepFocus, true);
+    window.addEventListener('mouseup', keepFocus, true);
+    window.addEventListener('click', keepFocus, true);
+    window.addEventListener('touchstart', keepFocus, { passive: false });
+    window.addEventListener('keydown', keepFocus, true);
+
+    // connect to AI room
     ws = connectWS('AIROOM', 'participant_ai');
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
+      // Only show true AI replies; display after display-side delay
       if (msg?.type === 'message' && msg?.from === 'ai') {
-        push({ from: 'ai', text: msg.text });
+        const targetDelaySec = 5 + Math.floor(Math.random() * 11); // 5–15s
+        const elapsed = Date.now() - lastUserSentAt;
+        const remaining = Math.max(0, targetDelaySec * 1000 - elapsed);
+        setTimeout(() => push({ from: 'ai', text: msg.text }), remaining);
       }
     });
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('mousedown', keepFocus, true);
+    window.removeEventListener('mouseup', keepFocus, true);
+    window.removeEventListener('click', keepFocus, true);
+    window.removeEventListener('touchstart', keepFocus);
+    window.removeEventListener('keydown', keepFocus, true);
   });
 
   function send() {
     const text = input.trim();
     if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
+    lastUserSentAt = Date.now();
     ws.send(JSON.stringify({ type: 'chat', text }));
     push({ from: 'me', text });
     input = '';
@@ -54,7 +71,7 @@
 <div class="chat-window" bind:this={winEl}>
   {#each log as m}
     <div class="line {m.from}">
-      <span class="speaker">{m.from === 'me' ? 'YOU>' : 'STEVE>'}</span>
+      <span class="speaker">{m.from === 'me' ? '<YOU' : 'STEVE>'}</span>
       <span class="text">{m.text}</span>
     </div>
   {/each}
@@ -67,6 +84,10 @@
     placeholder="Type command…"
     on:keydown={(e) => e.key === 'Enter' && send()}
     autofocus
+    autocomplete="off"
+    autocorrect="off"
+    autocapitalize="off"
+    spellcheck="false"
   />
 </div>
 
@@ -76,32 +97,25 @@
     border:1px solid #222;border-radius:10px;height:60vh;overflow-y:auto;padding:14px;
   }
 
-  /* Each message is a single row; NEVER overlaps */
   .line{
     display:flex; align-items:flex-start; gap:8px;
     width:100%; margin:12px 0; white-space:pre-wrap; word-break:break-word;
   }
 
-  /* Left side (STEVE): normal flow, text constrained to half screen */
-  .line.ai .text{ max-width:min(60ch, 46vw); text-align:left; }
-  .line.ai { justify-content:flex-start; }
+  /* Left = STEVE (green), Right = <YOU (offwhite) */
+  .line.ai   { justify-content:flex-start; }
+  .line.ai .text { max-width:min(60ch, 46vw); text-align:left; color:#0f0; }
+  .line.ai .speaker { color:#9f9; }
 
-  /* Right side (YOU): reverse row so label sits on right; also clamp width */
-  .line.me{ flex-direction:row-reverse; justify-content:flex-start; }
-  .line.me .text{ max-width:min(60ch, 46vw); text-align:right; }
-  .line.me .speaker{ margin-left:8px; margin-right:0; }
-
-  .speaker{ color:#9f9; margin-right:8px; }
-  .text{ color:#0f0; }
+  .line.me { flex-direction:row-reverse; justify-content:flex-start; }
+  .line.me .text { max-width:min(60ch, 46vw); text-align:right; color:#e8e8e8; }
+  .line.me .speaker { margin-left:8px; margin-right:0; color:#ddd; }
 
   .row{ margin-top:12px; }
   input{
-    width:100%; background:#000; color:#0f0; border:1px solid #222; border-radius:10px;
+    width:100%; background:#000; color:#e8e8e8; border:1px solid #222; border-radius:10px;
     padding:12px; font-size:22px; font-family:"Courier New",monospace;
+    caret-color:#e8e8e8;
   }
-
-  input:focus {
-    outline: none;
-    box-shadow: none;
-  }
+  input:focus{ outline:none; box-shadow:none; }
 </style>
