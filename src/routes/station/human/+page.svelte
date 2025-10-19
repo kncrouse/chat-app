@@ -11,17 +11,13 @@
 
   function push(line: Line) {
     log = [...log, line];
-    queueMicrotask(() => {
-      if (winEl) winEl.scrollTop = winEl.scrollHeight;
-    });
+    queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
   }
 
   onMount(() => {
     ws = connectWS('HUMANROOM', 'participant_human');
-
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
-      // Only append operator replies; ignore echoes of our own messages
       if (msg?.type === 'message' && msg?.from === 'operator') {
         push({ from: 'brain', text: msg.text });
       }
@@ -39,7 +35,7 @@
 
 <div class="chat-window" bind:this={winEl}>
   {#each log as m}
-    <div class="line {m.from === 'me' ? 'right' : 'left'}">
+    <div class="line {m.from}">
       <span class="speaker">{m.from === 'me' ? 'YOU>' : 'SCOTT>'}</span>
       <span class="text">{m.text}</span>
     </div>
@@ -55,40 +51,29 @@
 </div>
 
 <style>
-  .chat-window {
-    background: #000;
-    color: #0f0;
-    font-family: "Courier New", monospace;
-    font-size: 22px;
-    border: 1px solid #222;
-    border-radius: 10px;
-    height: 60vh;
-    overflow-y: auto;
-    padding: 14px;
+  .chat-window{
+    background:#000;color:#0f0;font-family:"Courier New",monospace;font-size:22px;
+    border:1px solid #222;border-radius:10px;height:60vh;overflow-y:auto;padding:14px;
   }
 
-  .line {
-    display: flex;
-    width: 100%;
-    margin: 10px 0;
-    white-space: pre-wrap;
-    word-break: break-word;
+  .line{
+    display:flex; align-items:flex-start; gap:8px;
+    width:100%; margin:12px 0; white-space:pre-wrap; word-break:break-word;
   }
-  .line.left  { justify-content: flex-start; text-align: left; }
-  .line.right { justify-content: flex-end;  text-align: right; }
 
-  .speaker { color: #9f9; margin-right: 8px; }
-  .text    { color: #0f0; max-width: 60ch; display: inline-block; }
+  .line.brain .text{ max-width:min(60ch, 46vw); text-align:left; }
+  .line.brain{ justify-content:flex-start; }
 
-  .row { margin-top: 12px; }
-  input {
-    width: 100%;
-    background: #000;
-    color: #0f0;
-    border: 1px solid #222;
-    border-radius: 10px;
-    padding: 12px;
-    font-size: 22px;
-    font-family: "Courier New", monospace;
+  .line.me{ flex-direction:row-reverse; justify-content:flex-start; }
+  .line.me .text{ max-width:min(60ch, 46vw); text-align:right; }
+  .line.me .speaker{ margin-left:8px; margin-right:0; }
+
+  .speaker{ color:#9f9; margin-right:8px; }
+  .text{ color:#0f0; }
+
+  .row{ margin-top:12px; }
+  input{
+    width:100%; background:#000; color:#0f0; border:1px solid #222; border-radius:10px;
+    padding:12px; font-size:22px; font-family:"Courier New",monospace;
   }
 </style>
