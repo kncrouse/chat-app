@@ -6,6 +6,10 @@
     let input = '';
     let connected = false;
     let roomId = '';
+
+    function toggleProjector() {
+      document.documentElement.classList.toggle('projector');
+    }
   
     function join() {
       if (!roomId.trim()) return;

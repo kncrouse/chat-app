@@ -8,6 +8,11 @@
   
     // You will type the room code on the page when you set up the projector.
     let roomId = '';
+
+    function toggleProjector() {
+      document.documentElement.classList.toggle('projector');
+    }
+
   
     function join() {
       if (!roomId.trim()) return;
