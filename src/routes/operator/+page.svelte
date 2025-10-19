@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { browser } from '$app/environment';
   import { onMount, onDestroy } from 'svelte';
   import { connectWS } from '$lib/ws';
 
@@ -23,6 +24,8 @@
   }
 
   onMount(() => {
+    if (!browser) return; 
+
     keepFocus();
     window.addEventListener('mousedown', keepFocus, true);
     window.addEventListener('mouseup', keepFocus, true);
