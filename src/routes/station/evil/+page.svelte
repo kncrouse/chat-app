@@ -47,6 +47,7 @@
     bind:value={input}
     placeholder="Type command…"
     on:keydown={(e) => e.key === 'Enter' && send()}
+    autofocus
   />
 </div>
 

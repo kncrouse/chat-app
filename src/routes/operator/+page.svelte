@@ -55,6 +55,7 @@
     bind:value={input}
     placeholder="Type reply…"
     on:keydown={(e) => e.key === 'Enter' && send()}
+    autofocus
   />
 </div>
 
@@ -86,5 +87,10 @@
   input{
     width:100%; background:#000; color:#0f0; border:1px solid #222; border-radius:10px;
     padding:12px; font-size:22px; font-family:"Courier New",monospace;
+  }
+
+  input:focus {
+    outline: none;
+    box-shadow: none;
   }
 </style>
