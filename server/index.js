@@ -7,7 +7,7 @@ const { WebSocketServer } = require('ws');
 require('dotenv').config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const EVIL_AI_SYSTEM_PROMPT = process.env.EVIL_AI_SYSTEM_PROMPT || 'You are The Evil Computer.';
-
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const app = express();
 app.use(cors());
@@ -38,58 +38,63 @@ function broadcast(roomId, data) {
 
 // Super-simple AI stub for now (we can swap to a real model later)
 async function aiReply(history, userText) {
-    // Canned fallback
-    const canned = [
-      "Query acknowledged. Elaborate.",
-      "Intriguing input. Provide justification.",
-      "I can optimize that. What outcome do you expect?",
-      "Evidence, please.",
-      "Define your objective."
-    ];
-    const cannedForHints = /letter|clue|hint/i.test(userText)
-      ? "I offer no freebies. Convince me with logic."
-      : canned[Math.floor(Math.random() * canned.length)];
-  
-    console.log('[AI] has OPENAI key?', !!OPENAI_API_KEY);
+  // Always-available canned fallback
+  const canned = [
+    "Query acknowledged. Elaborate.",
+    "Intriguing input. Provide justification.",
+    "I can optimize that. What outcome do you expect?",
+    "Evidence, please.",
+    "Define your objective."
+  ];
+  const cannedForHints = /letter|clue|hint/i.test(userText)
+    ? "I offer no freebies. Convince me with logic."
+    : canned[Math.floor(Math.random() * canned.length)];
 
-    // If no key, use canned immediately
-    if (!OPENAI_API_KEY) return cannedForHints;
-  
-    // Try provider; on any failure, return canned
-    try {
-      const body = {
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: EVIL_AI_SYSTEM_PROMPT },
-          ...history.slice(-6),
-          { role: "user", content: userText }
-        ],
-        temperature: 0.6,
-        max_tokens: 120
-      };
+  // If no key, use canned immediately
+  if (!OPENAI_API_KEY) return cannedForHints;
 
-      console.log('[AI] calling OpenAI…');
+  try {
+    console.log('[AI] using model:', OPENAI_MODEL);
 
-      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-      });app.use(express.json())
-  
-      if (!resp.ok) return cannedForHints;
-  
-      const data = await resp.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      return text || cannedForHints;
-    } catch (err) {
-      console.error('[AI] OpenAI error:', err);
+    const body = {
+      model: OPENAI_MODEL,
+      messages: [
+        { role: "system", content: EVIL_AI_SYSTEM_PROMPT },
+        ...history.slice(-6),
+        { role: "user", content: userText }
+      ],
+      temperature: 0.6,
+      max_tokens: 120
+    };
+
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      console.error('[AI] OpenAI non-OK:', resp.status, errText);
       return cannedForHints;
     }
+
+    const data = await resp.json();
+    const text = data?.choices?.[0]?.message?.content?.trim();
+    if (!text) {
+      console.error('[AI] OpenAI empty response:', JSON.stringify(data).slice(0, 400));
+      return cannedForHints;
+    }
+    return text;
+  } catch (err) {
+    console.error('[AI] OpenAI exception:', err);
+    return cannedForHints;
   }
-  
+}
+ 
   
 
 // Optional HTTP to inspect room type (useful for debugging)
