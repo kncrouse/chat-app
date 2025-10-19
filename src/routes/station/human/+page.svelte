@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { connectWS } from '$lib/ws';
 
   type Line = { from: 'me' | 'brain'; text: string };
@@ -10,35 +10,36 @@
   let input = '';
   let winEl: HTMLDivElement | null = null;
   let inputEl: HTMLInputElement | null = null;
-
   let lastUserSentAt = 0;
 
   function push(line: Line) {
     log = [...log, line];
-    queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
-  }
-
-  function keepFocus(ev?: Event) {
-    if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
-      ev.preventDefault(); ev.stopPropagation();
+    if (browser) {
+      queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
     }
-    if (document.activeElement !== inputEl && inputEl) inputEl.focus();
   }
 
   onMount(() => {
-    if (!browser) return; 
+    if (!browser) return; // skip on server render
 
-    keepFocus();
+    inputEl?.focus();
+
+    const keepFocus = (ev?: Event) => {
+      if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
+        ev.preventDefault(); ev.stopPropagation();
+      }
+      if (document.activeElement !== inputEl) inputEl?.focus();
+    };
+
     window.addEventListener('mousedown', keepFocus, true);
     window.addEventListener('mouseup', keepFocus, true);
     window.addEventListener('click', keepFocus, true);
-    window.addEventListener('touchstart', keepFocus, { passive: false });
+    window.addEventListener('touchstart', keepFocus, true);
     window.addEventListener('keydown', keepFocus, true);
 
     ws = connectWS('HUMANROOM', 'participant_human');
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
-      // Show SCOTT (operator) replies after display-side delay
       if (msg?.type === 'message' && msg?.from === 'operator') {
         const targetDelaySec = 5 + Math.floor(Math.random() * 11); // 5–15s
         const elapsed = Date.now() - lastUserSentAt;
@@ -46,14 +47,14 @@
         setTimeout(() => push({ from: 'brain', text: msg.text }), remaining);
       }
     });
-  });
 
-  onDestroy(() => {
-    window.removeEventListener('mousedown', keepFocus, true);
-    window.removeEventListener('mouseup', keepFocus, true);
-    window.removeEventListener('click', keepFocus, true);
-    window.removeEventListener('touchstart', keepFocus);
-    window.removeEventListener('keydown', keepFocus, true);
+    return () => {
+      window.removeEventListener('mousedown', keepFocus, true);
+      window.removeEventListener('mouseup', keepFocus, true);
+      window.removeEventListener('click', keepFocus, true);
+      window.removeEventListener('touchstart', keepFocus, true);
+      window.removeEventListener('keydown', keepFocus, true);
+    };
   });
 
   function send() {
@@ -100,7 +101,6 @@
     width:100%; margin:12px 0; white-space:pre-wrap; word-break:break-word;
   }
 
-  /* Left = SCOTT (green), Right = <YOU (offwhite) */
   .line.brain   { justify-content:flex-start; }
   .line.brain .text { max-width:min(60ch, 46vw); text-align:left; color:#0f0; }
   .line.brain .speaker { color:#9f9; }

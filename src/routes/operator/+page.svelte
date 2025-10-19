@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { connectWS } from '$lib/ws';
 
   type Line = { from: 'me' | 'user'; text: string };
@@ -13,50 +13,51 @@
 
   function push(line: Line) {
     log = [...log, line];
-    queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
-  }
-
-  function keepFocus(ev?: Event) {
-    if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
-      ev.preventDefault(); ev.stopPropagation();
+    if (browser) {
+      queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
     }
-    if (document.activeElement !== inputEl && inputEl) inputEl.focus();
   }
 
   onMount(() => {
-    if (!browser) return; 
+    if (!browser) return; // prevent SSR crash
 
-    keepFocus();
+    inputEl?.focus();
+
+    const keepFocus = (ev?: Event) => {
+      if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
+        ev.preventDefault(); ev.stopPropagation();
+      }
+      if (document.activeElement !== inputEl) inputEl?.focus();
+    };
+
     window.addEventListener('mousedown', keepFocus, true);
     window.addEventListener('mouseup', keepFocus, true);
     window.addEventListener('click', keepFocus, true);
-    window.addEventListener('touchstart', keepFocus, { passive: false });
+    window.addEventListener('touchstart', keepFocus, true);
     window.addEventListener('keydown', keepFocus, true);
 
     ws = connectWS('HUMANROOM', 'operator');
-
-    // Only show participant messages from the server (no delay here)
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg?.type === 'message' && msg?.from === 'participant_human') {
         push({ from: 'user', text: msg.text });
       }
     });
-  });
 
-  onDestroy(() => {
-    window.removeEventListener('mousedown', keepFocus, true);
-    window.removeEventListener('mouseup', keepFocus, true);
-    window.removeEventListener('click', keepFocus, true);
-    window.removeEventListener('touchstart', keepFocus);
-    window.removeEventListener('keydown', keepFocus, true);
+    return () => {
+      window.removeEventListener('mousedown', keepFocus, true);
+      window.removeEventListener('mouseup', keepFocus, true);
+      window.removeEventListener('click', keepFocus, true);
+      window.removeEventListener('touchstart', keepFocus, true);
+      window.removeEventListener('keydown', keepFocus, true);
+    };
   });
 
   function send() {
     const text = input.trim();
     if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
     ws.send(JSON.stringify({ type: 'chat', text }));
-    push({ from: 'me', text }); // show immediately; no delay on operator
+    push({ from: 'me', text }); // immediate display
     input = '';
   }
 </script>
@@ -95,7 +96,7 @@
     width:100%; margin:12px 0; white-space:pre-wrap; word-break:break-word;
   }
 
-  /* Operator colors reversed vs human page: right (<YOU) = green, left (USER) = offwhite */
+  /* Operator reversed colors */
   .line.user   { justify-content:flex-start; }
   .line.user .text { max-width:min(60ch, 46vw); text-align:left; color:#e8e8e8; }
   .line.user .speaker { color:#ddd; }
@@ -107,8 +108,7 @@
   .row{ margin-top:12px; }
   input{
     width:100%; background:#000; color:#0f0; border:1px solid #222; border-radius:10px;
-    padding:12px; font-size:22px; font-family:"Courier New",monospace;
-    caret-color:#0f0;
+    padding:12px; font-size:22px; font-family:"Courier New",monospace; caret-color:#0f0;
   }
   input:focus{ outline:none; box-shadow:none; }
 </style>
