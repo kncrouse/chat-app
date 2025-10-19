@@ -4,9 +4,15 @@ const http = require('http');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
 
+require('dotenv').config();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const EVIL_AI_SYSTEM_PROMPT = process.env.EVIL_AI_SYSTEM_PROMPT || 'You are The Evil Computer.';
+
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // roomId -> { type: 'EVIL'|'HUMAN'|null, sockets: Set<{ ws, actor: string }> }
 const rooms = new Map();
@@ -23,18 +29,55 @@ function broadcast(roomId, data) {
 }
 
 // Super-simple AI stub for now (we can swap to a real model later)
-async function aiReply(_history, userText) {
-  const canned = [
-    "Query acknowledged. Elaborate.",
-    "Intriguing input. Provide justification.",
-    "I can optimize that. What outcome do you expect?",
-    "Evidence, please.",
-    "Define your objective."
-  ];
-  // slightly react to user text to feel less random
-  if (/letter|clue|hint/i.test(userText)) return "I offer no freebies. Convince me with logic.";
-  return canned[Math.floor(Math.random() * canned.length)];
-}
+async function aiReply(history, userText) {
+    // Canned fallback
+    const canned = [
+      "Query acknowledged. Elaborate.",
+      "Intriguing input. Provide justification.",
+      "I can optimize that. What outcome do you expect?",
+      "Evidence, please.",
+      "Define your objective."
+    ];
+    const cannedForHints = /letter|clue|hint/i.test(userText)
+      ? "I offer no freebies. Convince me with logic."
+      : canned[Math.floor(Math.random() * canned.length)];
+  
+    // If no key, use canned immediately
+    if (!OPENAI_API_KEY) return cannedForHints;
+  
+    // Try provider; on any failure, return canned
+    try {
+      const body = {
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: EVIL_AI_SYSTEM_PROMPT },
+          ...history.slice(-6),
+          { role: "user", content: userText }
+        ],
+        temperature: 0.6,
+        max_tokens: 120
+      };
+  
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });app.use(express.json())
+  
+      if (!resp.ok) return cannedForHints;
+  
+      const data = await resp.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      return text || cannedForHints;
+    } catch {
+      return cannedForHints;
+    }
+  }
+  
+  
 
 // Optional HTTP to inspect room type (useful for debugging)
 app.get('/api/room/:id/type', (req, res) => {
