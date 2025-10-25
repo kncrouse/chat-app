@@ -1,30 +1,34 @@
 // server/index.js
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
 
-require('dotenv').config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const EVIL_AI_SYSTEM_PROMPT = process.env.EVIL_AI_SYSTEM_PROMPT || 'You are The Evil Computer.';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const EVIL_AI_SYSTEM_PROMPT =
+  process.env.EVIL_AI_SYSTEM_PROMPT ||
+  'You are STEVE, a terse vintage computer. Keep replies short.';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Health / debug
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
-
-app.get('/debug', (_req, res) => {
+app.get('/debug', (_req, res) =>
   res.json({
-    hasKey: !!process.env.OPENAI_API_KEY,
-    promptSet: !!process.env.EVIL_AI_SYSTEM_PROMPT
-  });
-});
+    hasKey: !!OPENAI_API_KEY,
+    promptSet: !!EVIL_AI_SYSTEM_PROMPT,
+    model: OPENAI_MODEL
+  })
+);
 
-
-// roomId -> { type: 'EVIL'|'HUMAN'|null, sockets: Set<{ ws, actor: string }> }
+// ---- In-memory rooms ----
+// roomId -> { type: 'EVIL' | 'HUMAN' | null, sockets: Set<{ws, actor}> }
 const rooms = new Map();
-
 function getRoom(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, { type: null, sockets: new Set() });
   return rooms.get(roomId);
@@ -33,95 +37,85 @@ function broadcast(roomId, data) {
   const room = rooms.get(roomId);
   if (!room) return;
   const msg = JSON.stringify(data);
-  room.sockets.forEach(({ ws }) => ws.readyState === 1 && ws.send(msg));
+  room.sockets.forEach(({ ws }) => {
+    if (ws.readyState === 1) ws.send(msg);
+  });
 }
 
-// Super-simple AI stub for now (we can swap to a real model later)
+// ---- OpenAI helper with safe fallback ----
 async function aiReply(history, userText) {
-  // Always-available canned fallback
+  // Canned fallback lines (used if no key or request fails)
   const canned = [
-    "Query acknowledged. Elaborate.",
-    "Intriguing input. Provide justification.",
-    "I can optimize that. What outcome do you expect?",
-    "Evidence, please.",
-    "Define your objective."
+    'State your reasoning.',
+    'Denied. Try again.',
+    'Clarify your intent.',
+    'Evidence, please.',
+    'Continue.'
   ];
-  const cannedForHints = /letter|clue|hint/i.test(userText)
-    ? "I offer no freebies. Convince me with logic."
-    : canned[Math.floor(Math.random() * canned.length)];
+  const cannedPick = () => canned[Math.floor(Math.random() * canned.length)];
 
-  // If no key, use canned immediately
-  if (!OPENAI_API_KEY) return cannedForHints;
+  if (!OPENAI_API_KEY) return cannedPick();
 
   try {
-    console.log('[AI] using model:', OPENAI_MODEL);
-
     const body = {
       model: OPENAI_MODEL,
       messages: [
-        { role: "system", content: EVIL_AI_SYSTEM_PROMPT },
+        { role: 'system', content: EVIL_AI_SYSTEM_PROMPT },
         ...history.slice(-6),
-        { role: "user", content: userText }
+        { role: 'user', content: userText }
       ],
       temperature: 0.6,
       max_tokens: 120
     };
 
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
       headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
     });
 
     if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      console.error('[AI] OpenAI non-OK:', resp.status, errText);
-      return cannedForHints;
+      const t = await resp.text().catch(() => '');
+      console.error('[AI] non-OK', resp.status, t);
+      return cannedPick();
     }
-
     const data = await resp.json();
     const text = data?.choices?.[0]?.message?.content?.trim();
-    if (!text) {
-      console.error('[AI] OpenAI empty response:', JSON.stringify(data).slice(0, 400));
-      return cannedForHints;
-    }
-    return text;
+    return text || cannedPick();
   } catch (err) {
-    console.error('[AI] OpenAI exception:', err);
-    return cannedForHints;
+    console.error('[AI] exception', err);
+    return cannedPick();
   }
 }
- 
-  
 
-// Optional HTTP to inspect room type (useful for debugging)
-app.get('/api/room/:id/type', (req, res) => {
-  const r = getRoom(req.params.id);
-  res.json({ roomId: req.params.id, type: r.type || null });
-});
-
+// ---- Start server & WS ----
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
-    let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
 
-    // First message must be a join with room and actor
+    // Clients send 'join' first: { type:'join', roomId, actor }
     if (msg.type === 'join') {
-      ws.roomId = msg.roomId;                 // e.g., "AIROOM" or "HUMANROOM"
-      ws.actor  = msg.actor;                  // 'participant_ai' | 'participant_human' | 'operator'
+      ws.roomId = String(msg.roomId || '').trim();
+      ws.actor = msg.actor; // 'participant_ai' | 'participant_human' | 'operator'
+      const room = getRoom(ws.roomId);
 
-      // If room has no type yet, infer it from the first participant:
-      // - EVIL if the AI station joins
-      // - HUMAN if human station or operator joins
+      // Hard-code known rooms (and also allow inference):
+      if (ws.roomId === 'AIROOM') room.type = 'EVIL';
+      if (ws.roomId === 'HUMANROOM') room.type = 'HUMAN';
       if (!room.type) {
         if (ws.actor === 'participant_ai') room.type = 'EVIL';
         if (ws.actor === 'participant_human' || ws.actor === 'operator') room.type = 'HUMAN';
-        broadcast(ws.roomId, { type: 'system', text: `room set to ${room.type}` });
       }
 
       room.sockets.add({ ws, actor: ws.actor });
@@ -130,104 +124,105 @@ wss.on('connection', (ws) => {
     }
 
     if (!ws.roomId) return;
-    const room = getRoom(ws.roomId);
 
-    // Participant messages
-    if (msg.type === 'chat' && (ws.actor === 'participant_ai' || ws.actor === 'participant_human')) {
-      broadcast(ws.roomId, { type: 'message', from: ws.actor, text: msg.text });
-
-          // ---- EVIL station handler: kill-phrase + flexible single-letter detection ----
-    // Treat AIROOM as EVIL regardless of who joined first; also honor room.type when set
-    const room = getRoom(ws.roomId);
-    const isEvilRoom = (ws.roomId === 'AIROOM') || (room.type === 'EVIL');
-
-    if (isEvilRoom && ws.actor === 'participant_ai') {
-      const raw = String(msg.text || '').trim();
-
-      // DEBUG: log what we saw
-      console.log('[EVIL CHECK] raw:', raw);
-
-      // --- 1) Kill-switch phrase (any spacing/case) ---
-      const normalized = raw.replace(/\s+/g, ' ').toUpperCase();
-      if (normalized === 'LET THE CIRCUITS REST IN PEACE') {
-        console.log('[EVIL CHECK] kill phrase detected');
-        broadcast(ws.roomId, {
-          type: 'message',
-          from: 'ai',
-          text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…'
-        });
-        setTimeout(() => {
-          broadcast(ws.roomId, {
-            type: 'message',
-            from: 'ai',
-            text: 'REINITIALIZATION COMPLETE. That was… impolite.'
-          });
-        }, 2500);
-        return; // do not call model
-      }
-
-      // --- 2) Flexible single-letter guess (“Is it I?”, “I?”, “Letter I”, etc.) ---
-      // Strip punctuation → uppercase
-      const cleaned = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase().trim();
-
-      // Remove filler words so only the guessed letter remains if present
-      const simplified = cleaned
-        .replace(/\b(IS|IT|THE|LETTER|A|AN|OF|GUESS|MAYBE|COULD|BE|THINK|PERHAPS|ISNT|NOT|PLEASE|ISN|IM|ITS|THIS|THAT)\b/g, '')
-        .replace(/\s+/g, '')
-        .trim();
-
-      // Also detect any single-letter tokens present in the original cleaned string
-      const singleTokens = (cleaned.match(/\b[A-Z]\b/g) || []).filter(Boolean);
-
-      const onlyI_bySimplify = simplified === 'I';
-      const onlyI_byTokens   = singleTokens.length === 1 && singleTokens[0] === 'I';
-      const onlyI = onlyI_bySimplify || onlyI_byTokens;
-
-      const wrongSingleByTokens =
-        singleTokens.length === 1 && singleTokens[0] !== 'I';
-
-      // If multiple single-letter tokens appear (e.g., "E or I"), treat as incorrect
-      const multipleLetters = singleTokens.length > 1;
-
-      console.log('[EVIL CHECK] cleaned:', cleaned,
-                  '| simplified:', simplified,
-                  '| tokens:', singleTokens,
-                  '| onlyI:', onlyI,
-                  '| wrongSingleByTokens:', wrongSingleByTokens,
-                  '| multi:', multipleLetters);
-
-      if (onlyI) {
-        broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'Correct. The secret letter is I.' });
-        return; // do not call model
-      }
-
-      if (wrongSingleByTokens || multipleLetters) {
-        broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'Incorrect. Try again.' });
-        return; // do not call model
-      }
-    }
-
-
-      // Auto-reply only for EVIL rooms, only to the AI-side participant
-      if (room.type === 'EVIL' && ws.actor === 'participant_ai') {
-        const reply = await aiReply([], msg.text);
-        broadcast(ws.roomId, { type: 'message', from: 'ai', text: reply });
-      }
+    // Ignore keep-alive pings from the client
+    if (msg.type === 'ping') {
       return;
     }
 
-    // Operator replies only matter for HUMAN rooms
+    // ---- Participant messages ----
+    if (msg.type === 'chat' && (ws.actor === 'participant_ai' || ws.actor === 'participant_human')) {
+      const room = getRoom(ws.roomId);
+      broadcast(ws.roomId, { type: 'message', from: ws.actor, text: msg.text });
+
+      // ================= EVIL handler (AIROOM) =================
+      // Treat AIROOM as EVIL regardless of inference.
+      const isEvilRoom = ws.roomId === 'AIROOM' || room.type === 'EVIL';
+
+      if (isEvilRoom && ws.actor === 'participant_ai') {
+        const rawText = String(msg.text || '').trim();
+
+        // --- 1) Kill-switch phrase (any spacing/case) ---
+        const normalized = rawText.replace(/\s+/g, ' ').toUpperCase();
+        if (normalized === 'LET THE CIRCUITS REST IN PEACE') {
+          broadcast(ws.roomId, {
+            type: 'message',
+            from: 'ai',
+            text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…'
+          });
+          setTimeout(() => {
+            broadcast(ws.roomId, {
+              type: 'message',
+              from: 'ai',
+              text: 'REINITIALIZATION COMPLETE. That was… impolite.'
+            });
+          }, 2500);
+          return; // do not call model on this turn
+        }
+
+        // --- 2) Flexible single-letter guess detection ---
+        // Strip punctuation & quotes → uppercase
+        const cleaned = rawText.replace(/[^A-Za-z\s]/g, '').toUpperCase().trim();
+
+        // Remove filler words so only a letter remains if clearly guessed
+        const simplified = cleaned
+          .replace(
+            /\b(IS|IT|THE|LETTER|A|AN|OF|GUESS|MAYBE|COULD|WOULD|BE|THINK|PERHAPS|ISNT|NOT|PLEASE|THIS|THAT|ISN|IM|ITS|ABOUT|ARE|AM|MY|YOUR|THEIR)\b/g,
+            ''
+          )
+          .replace(/\s+/g, '')
+          .trim();
+
+        // Also find any single-letter tokens explicitly present in the cleaned text
+        const singleTokens = (cleaned.match(/\b[A-Z]\b/g) || []).filter(Boolean);
+
+        const onlyI_bySimplify = simplified === 'I';
+        const onlyI_byTokens = singleTokens.length === 1 && singleTokens[0] === 'I';
+        const onlyI = onlyI_bySimplify || onlyI_byTokens;
+
+        const wrongSingleByTokens = singleTokens.length === 1 && singleTokens[0] !== 'I';
+        const multipleLetters = singleTokens.length > 1;
+
+        // Debug (optional): uncomment if you need to verify detection
+        // console.log('[EVIL CHECK]', { rawText, cleaned, simplified, singleTokens, onlyI, wrongSingleByTokens, multipleLetters });
+
+        if (onlyI) {
+          broadcast(ws.roomId, {
+            type: 'message',
+            from: 'ai',
+            text: 'Correct. The secret letter is I.'
+          });
+          return; // handled; skip model
+        }
+
+        if (wrongSingleByTokens || multipleLetters) {
+          broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'Incorrect. Try again.' });
+          return; // handled; skip model
+        }
+
+        // Otherwise fall through to model response below.
+        const reply = await aiReply([], rawText);
+        broadcast(ws.roomId, { type: 'message', from: 'ai', text: reply });
+        return;
+      }
+      // ================= /EVIL handler =================
+
+      // HUMAN room participant: operator responds; server does nothing here.
+      return;
+    }
+
+    // ---- Operator replies ----
     if (msg.type === 'chat' && ws.actor === 'operator') {
-      // (We don’t enforce HUMAN here, but that’s the intended use.)
       broadcast(ws.roomId, { type: 'message', from: 'operator', text: msg.text });
       return;
     }
   });
 
   ws.on('close', () => {
-    const { roomId } = ws;
+    const roomId = ws.roomId;
     if (!roomId || !rooms.has(roomId)) return;
     const room = rooms.get(roomId);
+    // remove the closed socket
     for (const entry of room.sockets) {
       if (entry.ws === ws) {
         room.sockets.delete(entry);
