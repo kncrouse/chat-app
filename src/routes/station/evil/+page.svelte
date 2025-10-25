@@ -111,7 +111,7 @@
   .line.ai .speaker { color:#9f9; }
 
   .line.me { flex-direction:row-reverse; justify-content:flex-start; }
-  .line.me .text { max-width:min(60ch, 46vw); text-align:right; color:#e8e8e8; }
+  .line.me .text { max-width:min(60ch, 46vw); text-align:right; color:#ffffff; }
   .line.me .speaker { margin-left:8px; margin-right:0; color:#ddd; }
 
   .row{ margin-top:12px; }
