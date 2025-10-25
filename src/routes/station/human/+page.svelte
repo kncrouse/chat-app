@@ -14,36 +14,47 @@
 
   function push(line: Line) {
     log = [...log, line];
-    if (browser) queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
-  }
-
-  function keepFocus(ev?: Event) {
-    if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
-      ev.preventDefault(); ev.stopPropagation();
+    if (browser) {
+      queueMicrotask(() => { if (winEl) winEl.scrollTop = winEl.scrollHeight; });
     }
-    if (document.activeElement !== inputEl) inputEl?.focus();
   }
 
   onMount(() => {
-    if (!browser) return;
+    if (!browser) return; // skip on server render
 
     inputEl?.focus();
+
+    const keepFocus = (ev?: Event) => {
+      if (ev instanceof KeyboardEvent && (ev.key === 'Tab' || ev.key === 'Escape')) {
+        ev.preventDefault(); ev.stopPropagation();
+      }
+      if (document.activeElement !== inputEl) inputEl?.focus();
+    };
+
     window.addEventListener('mousedown', keepFocus, true);
+    window.addEventListener('mouseup', keepFocus, true);
     window.addEventListener('click', keepFocus, true);
+    window.addEventListener('touchstart', keepFocus, true);
     window.addEventListener('keydown', keepFocus, true);
 
     ws = connectWS('HUMANROOM', 'participant_human');
-
     ws.addEventListener('message', (ev) => {
-      const msg = JSON.parse(ev.data as string);
-
+      const msg = JSON.parse(ev.data);
       if (msg?.type === 'message' && msg?.from === 'operator') {
-        const targetDelaySec = 5 + Math.floor(Math.random() * 11);
+        const targetDelaySec = 5 + Math.floor(Math.random() * 11); // 5–15s
         const elapsed = Date.now() - lastUserSentAt;
         const remaining = Math.max(0, targetDelaySec * 1000 - elapsed);
         setTimeout(() => push({ from: 'brain', text: msg.text }), remaining);
       }
     });
+
+    return () => {
+      window.removeEventListener('mousedown', keepFocus, true);
+      window.removeEventListener('mouseup', keepFocus, true);
+      window.removeEventListener('click', keepFocus, true);
+      window.removeEventListener('touchstart', keepFocus, true);
+      window.removeEventListener('keydown', keepFocus, true);
+    };
   });
 
   function send() {
@@ -53,7 +64,6 @@
     ws.send(JSON.stringify({ type: 'chat', text }));
     push({ from: 'me', text });
     input = '';
-    inputEl?.focus();
   }
 </script>
 
@@ -85,20 +95,25 @@
     background:#000;color:#0f0;font-family:"Courier New",monospace;font-size:22px;
     border:1px solid #222;border-radius:10px;height:60vh;overflow-y:auto;padding:14px;
   }
+
   .line{
     display:flex; align-items:flex-start; gap:8px;
     width:100%; margin:12px 0; white-space:pre-wrap; word-break:break-word;
   }
+
   .line.brain   { justify-content:flex-start; }
   .line.brain .text { max-width:min(60ch, 46vw); text-align:left; color:#0f0; }
   .line.brain .speaker { color:#9f9; }
+
   .line.me { flex-direction:row-reverse; justify-content:flex-start; }
   .line.me .text { max-width:min(60ch, 46vw); text-align:right; color:#e8e8e8; }
   .line.me .speaker { margin-left:8px; margin-right:0; color:#ddd; }
+
   .row{ margin-top:12px; }
   input{
     width:100%; background:#000; color:#e8e8e8; border:1px solid #222; border-radius:10px;
-    padding:12px; font-size:22px; font-family:"Courier New",monospace; caret-color:#e8e8e8;
+    padding:12px; font-size:22px; font-family:"Courier New",monospace;
+    caret-color:#e8e8e8;
   }
   input:focus{ outline:none; box-shadow:none; }
 </style>
