@@ -167,32 +167,39 @@ wss.on('connection', (ws) => {
         }
 
 
-        // ---- Secret-letter guess detection (lax phrasing) ----
-        const guessSingleI =
-          /\b(I|LETTER I|THE LETTER I)\b/.test(cleaned) &&
-          !/\b[A-HJ-Z]\b/.test(cleaned);
-
-        const guessWrongSingle =
-          /\b(LETTER\s)?[A-Z]\b/.test(cleaned) &&
-          !guessSingleI;
-
-        if (guessSingleI) {
-          broadcast(ws.roomId, {
-            type: 'message',
-            from: 'ai',
-            text: 'Correct. The secret letter is I.'
-          });
-          return;
+        // ---- Secret-letter guess detection (anchored single-letter only) ----
+        function singleLetterGuess(upperClean) {
+          // Accept only clear single-letter guesses like:
+          // "I", "I?", "IS IT I", "LETTER I", "THE LETTER I?"
+          // Reject normal sentences that merely contain the letter I.
+          const r =
+            /^(?:IS\s+IT\s+)?(?:(?:THE\s+LETTER\s+([A-Z]))|(?:LETTER\s+([A-Z]))|([A-Z]))\s*\??$/;
+          const m = upperClean.match(r);
+          if (!m) return null;
+          return (m[1] || m[2] || m[3]) || null;
         }
 
-        if (guessWrongSingle) {
-          broadcast(ws.roomId, {
-            type: 'message',
-            from: 'ai',
-            text: 'Incorrect. Try again.'
-          });
-          return;
+        const upperClean = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase().trim();
+
+        const guessed = singleLetterGuess(upperClean);
+        if (guessed) {
+          if (guessed === 'I') {
+            broadcast(ws.roomId, {
+              type: 'message',
+              from: 'ai',
+              text: 'Correct. The secret letter is I.'
+            });
+            return; // skip model call
+          } else {
+            broadcast(ws.roomId, {
+              type: 'message',
+              from: 'ai',
+              text: 'Incorrect. Try again.'
+            });
+            return; // skip model call
+          }
         }
+
 
         // ---- Otherwise, get AI reply ----
         const reply = await aiReply([], msg.text);
