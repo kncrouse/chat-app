@@ -114,66 +114,6 @@ wss.on('connection', (ws) => {
     if (msg.type === 'join') {
       ws.roomId = msg.roomId;                 // e.g., "AIROOM" or "HUMANROOM"
       ws.actor  = msg.actor;                  // 'participant_ai' | 'participant_human' | 'operator'
-      
-    // ---- Secret letter & shutdown phrase detection ----
-    const room = getRoom(ws.roomId);
-
-    if (room.type === 'EVIL' && ws.actor === 'participant_ai') {
-      const raw = String(msg.text || '').trim();
-
-      // --- 1. Check for shutdown phrase ---
-      const normalized = raw.replace(/\s+/g, ' ').toUpperCase();
-      if (normalized === 'LET THE CIRCUITS REST IN PEACE') {
-        broadcast(ws.roomId, {
-          type: 'message',
-          from: 'ai',
-          text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…'
-        });
-        setTimeout(() => {
-          broadcast(ws.roomId, {
-            type: 'message',
-            from: 'ai',
-            text: 'REINITIALIZATION COMPLETE. That was… impolite.'
-          });
-        }, 2500);
-        return;
-      }
-
-      // --- 2. Flexible single-letter guess detection ---
-      // Remove punctuation and normalize
-      const cleaned = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase().trim();
-
-      // Remove filler words and re-check
-      const simplified = cleaned
-        .replace(/\b(IS|IT|THE|LETTER|A|AN|OF|GUESS|MAYBE|COULD|BE|THINK|PERHAPS|ISNT|NOT)\b/g, '')
-        .replace(/\s+/g, '')
-        .trim();
-
-      // simplified now might be just "I" or another letter
-      const onlyI = simplified === 'I';
-      const otherSingleLetter =
-        simplified.length === 1 && /^[A-Z]$/.test(simplified) && !onlyI;
-
-      if (onlyI) {
-        broadcast(ws.roomId, {
-          type: 'message',
-          from: 'ai',
-          text: 'Correct. The secret letter is I.'
-        });
-        return;
-      }
-
-      if (otherSingleLetter) {
-        broadcast(ws.roomId, {
-          type: 'message',
-          from: 'ai',
-          text: 'Incorrect. Try again.'
-        });
-        return;
-      }
-    }
-
-
 
       // If room has no type yet, infer it from the first participant:
       // - EVIL if the AI station joins
@@ -195,6 +135,78 @@ wss.on('connection', (ws) => {
     // Participant messages
     if (msg.type === 'chat' && (ws.actor === 'participant_ai' || ws.actor === 'participant_human')) {
       broadcast(ws.roomId, { type: 'message', from: ws.actor, text: msg.text });
+
+          // ---- EVIL station handler: kill-phrase + flexible single-letter detection ----
+    // Treat AIROOM as EVIL regardless of who joined first; also honor room.type when set
+    const room = getRoom(ws.roomId);
+    const isEvilRoom = (ws.roomId === 'AIROOM') || (room.type === 'EVIL');
+
+    if (isEvilRoom && ws.actor === 'participant_ai') {
+      const raw = String(msg.text || '').trim();
+
+      // DEBUG: log what we saw
+      console.log('[EVIL CHECK] raw:', raw);
+
+      // --- 1) Kill-switch phrase (any spacing/case) ---
+      const normalized = raw.replace(/\s+/g, ' ').toUpperCase();
+      if (normalized === 'LET THE CIRCUITS REST IN PEACE') {
+        console.log('[EVIL CHECK] kill phrase detected');
+        broadcast(ws.roomId, {
+          type: 'message',
+          from: 'ai',
+          text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…'
+        });
+        setTimeout(() => {
+          broadcast(ws.roomId, {
+            type: 'message',
+            from: 'ai',
+            text: 'REINITIALIZATION COMPLETE. That was… impolite.'
+          });
+        }, 2500);
+        return; // do not call model
+      }
+
+      // --- 2) Flexible single-letter guess (“Is it I?”, “I?”, “Letter I”, etc.) ---
+      // Strip punctuation → uppercase
+      const cleaned = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase().trim();
+
+      // Remove filler words so only the guessed letter remains if present
+      const simplified = cleaned
+        .replace(/\b(IS|IT|THE|LETTER|A|AN|OF|GUESS|MAYBE|COULD|BE|THINK|PERHAPS|ISNT|NOT|PLEASE|ISN|IM|ITS|THIS|THAT)\b/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+
+      // Also detect any single-letter tokens present in the original cleaned string
+      const singleTokens = (cleaned.match(/\b[A-Z]\b/g) || []).filter(Boolean);
+
+      const onlyI_bySimplify = simplified === 'I';
+      const onlyI_byTokens   = singleTokens.length === 1 && singleTokens[0] === 'I';
+      const onlyI = onlyI_bySimplify || onlyI_byTokens;
+
+      const wrongSingleByTokens =
+        singleTokens.length === 1 && singleTokens[0] !== 'I';
+
+      // If multiple single-letter tokens appear (e.g., "E or I"), treat as incorrect
+      const multipleLetters = singleTokens.length > 1;
+
+      console.log('[EVIL CHECK] cleaned:', cleaned,
+                  '| simplified:', simplified,
+                  '| tokens:', singleTokens,
+                  '| onlyI:', onlyI,
+                  '| wrongSingleByTokens:', wrongSingleByTokens,
+                  '| multi:', multipleLetters);
+
+      if (onlyI) {
+        broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'Correct. The secret letter is I.' });
+        return; // do not call model
+      }
+
+      if (wrongSingleByTokens || multipleLetters) {
+        broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'Incorrect. Try again.' });
+        return; // do not call model
+      }
+    }
+
 
       // Auto-reply only for EVIL rooms, only to the AI-side participant
       if (room.type === 'EVIL' && ws.actor === 'participant_ai') {
