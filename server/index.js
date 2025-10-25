@@ -118,7 +118,6 @@ wss.on('connection', (ws) => {
     // ---- Secret letter & shutdown phrase detection ----
     const room = getRoom(ws.roomId);
 
-    // Only run for the Evil AI station (AIROOM)
     if (room.type === 'EVIL' && ws.actor === 'participant_ai') {
       const raw = String(msg.text || '').trim();
 
@@ -137,40 +136,43 @@ wss.on('connection', (ws) => {
             text: 'REINITIALIZATION COMPLETE. That was… impolite.'
           });
         }, 2500);
-        return; // stop further processing
+        return;
       }
 
-      // --- 2. Check for single-letter guesses ---
-      // Clean text: remove punctuation, uppercase letters only
-      const cleaned = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase();
+      // --- 2. Flexible single-letter guess detection ---
+      // Remove punctuation and normalize
+      const cleaned = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase().trim();
 
-      // Match anything that clearly guesses only the letter I
-      const guessSingleI =
-        /\b(I|LETTER I|THE LETTER I)\b/.test(cleaned) &&
-        !/\b[A-HJ-Z]\b/.test(cleaned); // ensures no other single letters present
+      // Remove filler words and re-check
+      const simplified = cleaned
+        .replace(/\b(IS|IT|THE|LETTER|A|AN|OF|GUESS|MAYBE|COULD|BE|THINK|PERHAPS|ISNT|NOT)\b/g, '')
+        .replace(/\s+/g, '')
+        .trim();
 
-      // Match wrong single-letter guesses (E, A, etc.)
-      const guessWrongSingle =
-        /\b(LETTER\s)?[A-Z]\b/.test(cleaned) && !guessSingleI;
+      // simplified now might be just "I" or another letter
+      const onlyI = simplified === 'I';
+      const otherSingleLetter =
+        simplified.length === 1 && /^[A-Z]$/.test(simplified) && !onlyI;
 
-      if (guessSingleI) {
+      if (onlyI) {
         broadcast(ws.roomId, {
           type: 'message',
           from: 'ai',
           text: 'Correct. The secret letter is I.'
         });
-        return; // don’t call the model
+        return;
       }
 
-      if (guessWrongSingle) {
+      if (otherSingleLetter) {
         broadcast(ws.roomId, {
           type: 'message',
           from: 'ai',
           text: 'Incorrect. Try again.'
         });
-        return; // don’t call the model
+        return;
       }
     }
+
 
 
       // If room has no type yet, infer it from the first participant:
