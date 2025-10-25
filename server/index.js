@@ -147,12 +147,25 @@ wss.on('connection', (ws) => {
         // ---- FEIGNED SHUTDOWN if full phrase typed ----
         const normalized = raw.replace(/\s+/g, ' ').trim().toUpperCase();
         if (normalized === 'LET THE CIRCUITS REST IN PEACE') {
-          broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…' });
+          // first: show FAILURE immediately (no client delay)
+          broadcast(ws.roomId, {
+            type: 'message',
+            from: 'ai',
+            text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…',
+            no_delay: true
+          });
+          // then: 2.5s later, the reboot (also no delay)
           setTimeout(() => {
-            broadcast(ws.roomId, { type: 'message', from: 'ai', text: 'REINITIALIZATION COMPLETE. That was… impolite.' });
+            broadcast(ws.roomId, {
+              type: 'message',
+              from: 'ai',
+              text: 'REINITIALIZATION COMPLETE. That was… impolite.',
+              no_delay: true
+            });
           }, 2500);
           return;
         }
+
 
         // ---- Secret-letter guess detection (lax phrasing) ----
         const guessSingleI =
