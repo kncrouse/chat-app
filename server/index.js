@@ -114,7 +114,64 @@ wss.on('connection', (ws) => {
     if (msg.type === 'join') {
       ws.roomId = msg.roomId;                 // e.g., "AIROOM" or "HUMANROOM"
       ws.actor  = msg.actor;                  // 'participant_ai' | 'participant_human' | 'operator'
-      const room = getRoom(ws.roomId);
+      
+    // ---- Secret letter & shutdown phrase detection ----
+    const room = getRoom(ws.roomId);
+
+    // Only run for the Evil AI station (AIROOM)
+    if (room.type === 'EVIL' && ws.actor === 'participant_ai') {
+      const raw = String(msg.text || '').trim();
+
+      // --- 1. Check for shutdown phrase ---
+      const normalized = raw.replace(/\s+/g, ' ').toUpperCase();
+      if (normalized === 'LET THE CIRCUITS REST IN PEACE') {
+        broadcast(ws.roomId, {
+          type: 'message',
+          from: 'ai',
+          text: 'SYSTEM FAILURE… power dropping… memory sectors dimming…'
+        });
+        setTimeout(() => {
+          broadcast(ws.roomId, {
+            type: 'message',
+            from: 'ai',
+            text: 'REINITIALIZATION COMPLETE. That was… impolite.'
+          });
+        }, 2500);
+        return; // stop further processing
+      }
+
+      // --- 2. Check for single-letter guesses ---
+      // Clean text: remove punctuation, uppercase letters only
+      const cleaned = raw.replace(/[^A-Za-z\s]/g, '').toUpperCase();
+
+      // Match anything that clearly guesses only the letter I
+      const guessSingleI =
+        /\b(I|LETTER I|THE LETTER I)\b/.test(cleaned) &&
+        !/\b[A-HJ-Z]\b/.test(cleaned); // ensures no other single letters present
+
+      // Match wrong single-letter guesses (E, A, etc.)
+      const guessWrongSingle =
+        /\b(LETTER\s)?[A-Z]\b/.test(cleaned) && !guessSingleI;
+
+      if (guessSingleI) {
+        broadcast(ws.roomId, {
+          type: 'message',
+          from: 'ai',
+          text: 'Correct. The secret letter is I.'
+        });
+        return; // don’t call the model
+      }
+
+      if (guessWrongSingle) {
+        broadcast(ws.roomId, {
+          type: 'message',
+          from: 'ai',
+          text: 'Incorrect. Try again.'
+        });
+        return; // don’t call the model
+      }
+    }
+
 
       // If room has no type yet, infer it from the first participant:
       // - EVIL if the AI station joins
